@@ -5,7 +5,7 @@ from datetime import datetime, timezone, timedelta
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from uptash_redis import Redis
+from upstash_redis import Redis
 from zoneinfo import ZoneInfo
 
 pt = ZoneInfo("America/Los_Angeles")
