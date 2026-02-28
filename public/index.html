@@ -505,45 +505,29 @@ function updateCountdown() {
 function clamp(n, a, b){ return Math.max(a, Math.min(b, n)); }
 
 function hardScoreFromLate(lateMins) {
-  // 0–2 mins late counts as perfect
+  // 0–2 minutes = perfect
   if (lateMins <= 2) return 100;
 
-  // After that, decay. Tune this curve however you want:
-  // - 10 mins late ~ 80
-  // - 30 mins late ~ 40
-  // - 60 mins late ~ 0
-  const score = 100 - (lateMins - 2) * 2; // 2 points per minute after grace
+  // Simple linear decay after grace:
+  // 10 mins late -> 84
+  // 30 mins late -> 44
+  // 52+ mins late -> 0
+  const score = 100 - (lateMins - 2) * 2;
   return clamp(Math.round(score), 0, 100);
 }
 
 function crowdScoreFromVotes(votesObj) {
-  if (!votesObj) return null;
-  const on = votesObj.ontime || 0;
-  const lt = votesObj.late   || 0;
+  const on = votesObj?.ontime || 0;
+  const lt = votesObj?.late   || 0;
   const total = on + lt;
-  if (!total) return null;
-  return Math.round((on / total) * 100); // 0..100
-}
-
-function voteWeight(totalVotes) {
-  // No influence until we have enough signal
-  const MIN_VOTES = 8;      // below this, ignore crowd
-  const FULL_AT   = 40;     // at ~40 votes, crowd influence reaches max
-  const MAX_W     = 0.35;   // crowd can contribute at most 35%
-
-  if (totalVotes < MIN_VOTES) return 0;
-
-  // Ramp smoothly from MIN_VOTES -> FULL_AT
-  const t = (totalVotes - MIN_VOTES) / (FULL_AT - MIN_VOTES);
-  return MAX_W * clamp(t, 0, 1);
+  if (!total) return 50; // only neutral when 0 votes
+  return Math.round((on / total) * 100);
 }
 
 function calcTrust(streams) {
   if (!streams.length) return { score:50, ontimeCount:0, lateCount:0, avgLate:0 };
 
   let on=0, late=0, totalLate=0;
-
-  // Trust score is the mean of blended per-stream scores
   let blendedSum = 0;
 
   streams.forEach(s => {
@@ -555,31 +539,22 @@ function calcTrust(streams) {
     if (late_mins <= 2) on++;
     else { late++; totalLate += late_mins; }
 
-    const hard = hardScoreFromLate(late_mins);
+    const hard  = hardScoreFromLate(late_mins);
 
-    // Pull persisted votes from the stream if present (best),
-    // otherwise fall back to today's live votes object if you want.
-    const v = s.votes || null;
-    const crowd = crowdScoreFromVotes(v);
+    // Use persisted votes for that stream-day if present.
+    // Fallback to null => neutral 50
+    const crowd = crowdScoreFromVotes(s.votes || null);
 
-    let scoreThis = hard;
-
-    if (crowd !== null) {
-      const totalVotes = (v.ontime || 0) + (v.late || 0);
-      const w = voteWeight(totalVotes);      // 0..MAX_W
-      scoreThis = Math.round((1 - w) * hard + w * crowd);
-    }
-
+    // TRUE equal influence:
+    const scoreThis = Math.round(0.5 * hard + 0.5 * crowd);
     blendedSum += scoreThis;
   });
 
-  const avgLate  = late ? Math.round(totalLate / late) : 0;
-  const score    = Math.round(blendedSum / streams.length);
+  const avgLate = late ? Math.round(totalLate / late) : 0;
+  const score   = Math.round(blendedSum / streams.length);
 
   return { score, ontimeCount:on, lateCount:late, avgLate };
 }
-
-
 function renderTrust(t) {
   const { score, ontimeCount, lateCount, avgLate } = t;
   document.getElementById('needleGroup').style.transform = `rotate(${(score/100)*180-90}deg)`;
