@@ -5,7 +5,19 @@ from datetime import datetime, timezone, timedelta
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from upstash_redis import Redis
+from uptash_redis import Redis
+from zoneinfo import ZoneInfo
+
+pt = ZoneInfo("America/Los_Angeles")
+
+def pt_now() -> datetime:
+    return datetime.now(timezone.utc).astimezone(pt)
+
+def pt_today() -> str:
+    return pt_now().strftime("%Y-%m-%d")
+
+def pt_time_str(dt_utc: datetime) -> str:
+    return dt_utc.astimezone(pt).strftime("%H:%M")
 
 app = FastAPI()
 
@@ -23,7 +35,7 @@ STREAMER_LOGIN       = os.environ.get("STREAMER_LOGIN", "licky_t")
 KV_URL               = os.environ.get("KV_REST_API_URL", "")
 KV_TOKEN             = os.environ.get("KV_REST_API_TOKEN", "")
 
-SCHEDULED_HOUR_PST = 17  # 5:00 PM PST
+SCHEDULED_HOUR_pt = 17  # 5:00 PM pt
 LATE_GRACE_MINS    = 2   # 2 min grace period before counted as late
 
 # ── REDIS ────────────────────────────────────────────────
@@ -55,21 +67,12 @@ async def get_twitch_token() -> str:
         return data["access_token"]
 
 # ── HELPERS ──────────────────────────────────────────────
-def pst_now() -> datetime:
-    return datetime.now(timezone.utc) - timedelta(hours=8)
 
-def pst_today() -> str:
-    return pst_now().strftime("%Y-%m-%d")
-
-def pst_time_str(dt: datetime) -> str:
-    """Convert UTC datetime to PST HH:MM string."""
-    pst = dt - timedelta(hours=8)
-    return pst.strftime("%H:%M")
 
 def calc_late_mins(start_hhmm: str) -> int:
     h, m = map(int, start_hhmm.split(":"))
     actual_mins = h * 60 + m
-    scheduled_mins = SCHEDULED_HOUR_PST * 60
+    scheduled_mins = SCHEDULED_HOUR_pt * 60
     return max(0, actual_mins - scheduled_mins)
 
 # ── ROUTES ───────────────────────────────────────────────
@@ -104,7 +107,7 @@ async def get_status():
         if data.get("data"):
             stream = data["data"][0]
             started_at_utc = datetime.fromisoformat(stream["started_at"].replace("Z", "+00:00"))
-            started_pst = pst_time_str(started_at_utc)
+            started_pt = pt_time_str(started_at_utc)
 
             # Check if we already know about this stream session
             cached_raw = r.get("current_stream")
@@ -112,11 +115,11 @@ async def get_status():
 
             if not cached or cached.get("started_at") != stream["started_at"]:
                 # New stream detected — record it
-                today = pst_today()
-                late_mins = calc_late_mins(started_pst)
+                today = pt_today()
+                late_mins = calc_late_mins(started_pt)
                 new_session = {
                     "started_at": stream["started_at"],
-                    "started_pst": started_pst,
+                    "started_pt": started_pt,
                     "date": today,
                     "late_mins": late_mins,
                 }
@@ -125,7 +128,7 @@ async def get_status():
             return {
                 "live": True,
                 "started_at": stream["started_at"],
-                "started_pst": started_pst,
+                "started_pt": started_pt,
                 "viewer_count": stream["viewer_count"],
                 "title": stream.get("title", ""),
                 **_get_community_data(r),
@@ -180,7 +183,7 @@ def _save_completed_stream(r, session: dict, duration_hours: float):
 
     streams.append({
         "date": date,
-        "startTime": session["started_pst"],
+        "startTime": session["started_pt"],
         "started_at": session["started_at"],
         "late_mins": session["late_mins"],
         "duration": duration_hours,
@@ -193,7 +196,7 @@ def _save_completed_stream(r, session: dict, duration_hours: float):
     r.set("streams", json.dumps(streams))
 
 def _get_community_data(r) -> dict:
-    today = pst_today()
+    today = pt_today()
     vraw  = r.get(f"votes:{today}")
     lvraw = r.get(f"length_votes:{today}")
     sraw  = r.get("streams")
@@ -214,7 +217,7 @@ async def get_streams():
 @app.get("/api/votes")
 async def get_votes():
     r = get_redis()
-    today = pst_today()
+    today = pt_today()
     vraw  = r.get(f"votes:{today}")
     lvraw = r.get(f"length_votes:{today}")
     return {
@@ -232,7 +235,7 @@ async def cast_vote(body: VoteBody):
     if body.type not in ("ontime", "late"):
         raise HTTPException(status_code=400, detail="type must be 'ontime' or 'late'")
     r = get_redis()
-    today = pst_today()
+    today = pt_today()
     key = f"votes:{today}"
     raw = r.get(key)
     votes = json.loads(raw) if raw else {"ontime": 0, "late": 0}
@@ -251,7 +254,7 @@ async def cast_length_vote(body: LengthVoteBody):
     if body.bucket not in valid:
         raise HTTPException(status_code=400, detail="Invalid bucket")
     r = get_redis()
-    today = pst_today()
+    today = pt_today()
     key = f"length_votes:{today}"
     raw = r.get(key)
     votes = json.loads(raw) if raw else {k: 0 for k in valid}
