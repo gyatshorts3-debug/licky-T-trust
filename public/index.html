@@ -524,6 +524,73 @@ function crowdScoreFromVotes(votesObj) {
   return Math.round((on / total) * 100);
 }
 
+function isSameDayPST(dateISO, pstDateKey) {
+  return dateISO === pstDateKey;
+}
+
+function calcLateMinsFromStartedAtUTC(startedAtISO) {
+  // startedAtISO is UTC (e.g. "2026-02-27T01:23:45Z")
+  // Convert to PST by subtracting 8 hours (your whole site does this)
+  const d = new Date(startedAtISO);
+  const pst = new Date(d.getTime() - 8 * 3600000);
+  const h = pst.getUTCHours();
+  const m = pst.getUTCMinutes();
+  const actualMins = h * 60 + m;
+  return Math.max(0, actualMins - SCHEDULED_MIN);
+}
+
+function calcLateMinsRightNow() {
+  // If not live yet and it's past schedule, count how late he is so far.
+  const now = getPST(); // already PST-shifted Date
+  const h = now.getUTCHours();
+  const m = now.getUTCMinutes();
+  const actualMins = h * 60 + m;
+  return Math.max(0, actualMins - SCHEDULED_MIN);
+}
+
+function streamsAlreadyContainToday(streamsArr) {
+  const today = todayKey();
+  return streamsArr.some(s => s.date === today);
+}
+
+function buildTodaySyntheticStream() {
+  const today = todayKey();
+
+  // If he's live, use actual start time from Twitch.
+  // If not live, use "lateness so far" once past scheduled time.
+  let late_mins = 0;
+  let startTime = "17:00"; // fallback
+
+  if (liveData?.started_at) {
+    late_mins = calcLateMinsFromStartedAtUTC(liveData.started_at);
+
+    // also build startTime "HH:MM" in PST for display / consistency
+    const d = new Date(liveData.started_at);
+    const pst = new Date(d.getTime() - 8 * 3600000);
+    const hh = String(pst.getUTCHours()).padStart(2, "0");
+    const mm = String(pst.getUTCMinutes()).padStart(2, "0");
+    startTime = `${hh}:${mm}`;
+  } else {
+    // Not live yet:
+    late_mins = calcLateMinsRightNow();
+    // If not yet scheduled time, late_mins = 0 which is fine.
+  }
+
+  return {
+    date: today,
+    startTime,
+    late_mins,
+    // IMPORTANT: use LIVE current votes (not persisted snapshot)
+    votes: { ...votes },
+
+    // Optional: keep length votes live too if you ever use them later
+    length_votes: { ...lengthVotes },
+
+    // Mark as synthetic so you can ignore elsewhere if needed
+    _synthetic: true,
+  };
+}
+
 function calcTrust(streams) {
   if (!streams.length) return { score:50, ontimeCount:0, lateCount:0, avgLate:0 };
 
@@ -708,15 +775,33 @@ async function voteLength(btn, key) {
 
 // ── RENDER ALL ────────────────────────────────────────────
 function renderAll() {
-  const trust = calcTrust(streams);
+  let trustStreams = streams;
+
+  // Add a live "today" entry if today isn't already logged in history.
+  if (!streamsAlreadyContainToday(streams)) {
+    const todaySynthetic = buildTodaySyntheticStream();
+
+    // Only include if it’s meaningful:
+    // - either live, OR past scheduled time, OR there are any votes today
+    const totalVotesNow = (votes.ontime || 0) + (votes.late || 0);
+    const nowLate = todaySynthetic.late_mins > 0;
+
+    if (liveData || nowLate || totalVotesNow > 0) {
+      trustStreams = [...streams, todaySynthetic];
+    }
+  }
+
+  const trust = calcTrust(trustStreams);
   renderTrust(trust);
+
+  // Engine/shame/recent should still use REAL history only (optional)
   renderEngine(streams);
   renderShame(streams);
   renderRecent(streams);
+
   renderVotes();
   renderLength();
 }
-
 // ── INIT ──────────────────────────────────────────────────
 async function init() {
   loadLocalVoteState();
