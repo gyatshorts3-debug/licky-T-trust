@@ -167,16 +167,30 @@ def _save_completed_stream(r, session: dict, duration_hours: float):
         if s.get("started_at") == session["started_at"]:
             return
 
+    # Snapshot today's votes into the stream record (so votes persist)
+    date = session["date"]
+    vkey  = f"votes:{date}"
+    lvkey = f"length_votes:{date}"
+
+    vraw  = r.get(vkey)
+    lvraw = r.get(lvkey)
+
+    day_votes = json.loads(vraw) if vraw else {"ontime": 0, "late": 0}
+    day_len   = json.loads(lvraw) if lvraw else {k: 0 for k in ["under1","1to2","2to3","3to4","over4","ragequit"]}
+
     streams.append({
-        "date": session["date"],
+        "date": date,
         "startTime": session["started_pst"],
         "started_at": session["started_at"],
         "late_mins": session["late_mins"],
         "duration": duration_hours,
+
+        # NEW: persisted community sentiment for that stream-day
+        "votes": day_votes,
+        "length_votes": day_len,
     })
 
     r.set("streams", json.dumps(streams))
-
 
 def _get_community_data(r) -> dict:
     today = pst_today()
