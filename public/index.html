@@ -464,7 +464,7 @@ function setTwitchBadge(cls, msg) {
 // ── COUNTDOWN ─────────────────────────────────────────────
 function updateCountdown() {
   const now    = getPST();
-  const target = new Date(now); target.setHours(17,0,0,0);
+  const target = new Date(now); target.setUTCHours(17,0,0,0);
   const diff   = target - now;
 
   const el   = document.getElementById('countdownDisplay');
