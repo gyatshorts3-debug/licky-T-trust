@@ -382,17 +382,34 @@ let userVoted    = null;
 let userLenVoted = null;
 
 // ── DAILY RESET — votes stored with today's date key ──────
-function todayKey() {
-  const pt = getPT();
-  const y = pt.getFullYear();
-  const m = String(pt.getMonth() + 1).padStart(2, '0');
-  const d = String(pt.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
+
+
+function getPT() {
+  // PT wall-clock Date (DST-safe)
+  return new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
 }
 
-function getPST() { // keep name if you want, but it's PT
-  return getPT();
+function ptMinutesSinceMidnight(d = getPT()) {
+  // IMPORTANT: use local getters (NOT UTC getters)
+  return d.getHours() * 60 + d.getMinutes();
 }
+
+function ptDateKey(d = getPT()) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function ptHHMM(d = getPT()) {
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+
+
+function todayKey() { return ptDateKey(); }
+
 
 function loadLocalVoteState() {
   const today = todayKey();
@@ -480,7 +497,7 @@ function getScheduledStreamTimePT(nowPT = getPT()) {
 
 // ── COUNTDOWN ─────────────────────────────────────────────
 function updateCountdown() {
-  const now = getPST();
+  const now = getPT();
 
   const el   = document.getElementById('countdownDisplay');
   const lbl  = document.getElementById('countdownLabel');
@@ -552,23 +569,13 @@ function isSameDayPST(dateISO, pstDateKey) {
 }
 
 function calcLateMinsFromStartedAtUTC(startedAtISO) {
-  // startedAtISO is UTC (e.g. "2026-02-27T01:23:45Z")
-  // Convert to PST by subtracting 8 hours (your whole site does this)
-  const d = new Date(startedAtISO);
-  const pst = new Date(d.getTime() - 8 * 3600000);
-  const h = pst.getUTCHours();
-  const m = pst.getUTCMinutes();
-  const actualMins = h * 60 + m;
-  return Math.max(0, actualMins - SCHEDULED_MIN);
+  const utc = new Date(startedAtISO); // real UTC instant
+  const pt = new Date(utc.toLocaleString('en-US', { timeZone: 'America/Los_Angeles' })); // PT wall-clock
+  return Math.max(0, ptMinutesSinceMidnight(pt) - SCHEDULED_MIN);
 }
 
 function calcLateMinsRightNow() {
-  // If not live yet and it's past schedule, count how late he is so far.
-  const now = getPST(); // already PST-shifted Date
-  const h = now.getUTCHours();
-  const m = now.getUTCMinutes();
-  const actualMins = h * 60 + m;
-  return Math.max(0, actualMins - SCHEDULED_MIN);
+  return Math.max(0, ptMinutesSinceMidnight() - SCHEDULED_MIN);
 }
 
 function streamsAlreadyContainToday(streamsArr) {
@@ -587,16 +594,12 @@ function buildTodaySyntheticStream() {
   if (liveData?.started_at) {
     late_mins = calcLateMinsFromStartedAtUTC(liveData.started_at);
 
-    // also build startTime "HH:MM" in PST for display / consistency
-    const d = new Date(liveData.started_at);
-    const pst = new Date(d.getTime() - 8 * 3600000);
-    const hh = String(pst.getUTCHours()).padStart(2, "0");
-    const mm = String(pst.getUTCMinutes()).padStart(2, "0");
-    startTime = `${hh}:${mm}`;
-  } else {
-    // Not live yet:
+    const utc = new Date(liveData.started_at);
+    const pt = new Date(utc.toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
+    startTime = ptHHMM(pt);
+  } 
+  else {
     late_mins = calcLateMinsRightNow();
-    // If not yet scheduled time, late_mins = 0 which is fine.
   }
 
   return {
