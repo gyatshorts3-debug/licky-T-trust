@@ -77,6 +77,18 @@ def calc_late_mins(start_hhmm: str) -> int:
 
 # ── ROUTES ───────────────────────────────────────────────
 
+from fastapi import Response
+
+@app.head("/api/status")
+async def head_status():
+    # IMPORTANT:
+    # UptimeRobot uses HEAD. We still want the side-effects:
+    # - detect live/offline
+    # - save completed streams
+    # - clear current_stream, etc.
+    await get_status()
+    return Response(status_code=200)
+
 @app.get("/api/status")
 async def get_status():
     """
@@ -144,8 +156,8 @@ async def get_status():
                 ended_at_utc = datetime.now(timezone.utc)
                 duration_hours = round((ended_at_utc - started_at_utc).total_seconds() / 3600, 2)
 
-                # Only save if stream was at least 10 minutes (avoid false positives)
-                if duration_hours >= (10 / 60):
+                # Only save if stream was at least 1 minutes (avoid false positives)
+                if duration_hours >= (1 / 60):
                     _save_completed_stream(r, cached, duration_hours)
 
                 # Clear the active session
@@ -242,7 +254,7 @@ async def cast_vote(body: VoteBody):
     votes[body.type] = votes.get(body.type, 0) + 1
     r.set(key, json.dumps(votes))
     r.expire(key, 60 * 60 * 48)  # auto-expire after 48h
-    return {"ok": True, "votes": votes}
+    return {"ok": True, "votes": votes} 
 
 
 class LengthVoteBody(BaseModel):
