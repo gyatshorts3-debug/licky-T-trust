@@ -84,12 +84,11 @@ def _try_finalize_stale_current_stream(r: Redis):
     if not cached_raw:
         return False
 
-    cached = json.loads(cached_raw)
+    cached = normalize_session(json.loads(cached_raw))
     started_at_utc = datetime.fromisoformat(cached["started_at"].replace("Z", "+00:00"))
     now_utc = datetime.now(timezone.utc)
     age_minutes = (now_utc - started_at_utc).total_seconds() / 60
 
-    # Don’t finalize if it might still be live (short blips/errors)
     if age_minutes < 15:
         return False
 
@@ -98,6 +97,12 @@ def _try_finalize_stale_current_stream(r: Redis):
     r.delete("current_stream")
     return True
 
+def normalize_session(session: dict) -> dict:
+    # Handle older key name "started_pst" (from earlier builds)
+    if "started_pt" not in session and "started_pst" in session:
+        session["started_pt"] = session["started_pst"]
+    return session
+
 @app.api_route("/api/status", methods=["GET", "HEAD"])
 async def get_status():
     """
@@ -105,10 +110,11 @@ async def get_status():
     When going live: record stream start in Redis.
     When going offline: calculate duration, save completed stream.
     """
-    if not TWITCH_CLIENT_ID or not TWITCH_CLIENT_SECRET:
-        return {"live": False, "error": "Twitch not configured", "streams": [], "votes": {}, "length_votes": {}}
-
     r = get_redis()
+
+    if not TWITCH_CLIENT_ID or not TWITCH_CLIENT_SECRET:
+        _try_finalize_stale_current_stream(r)
+        return {"live": False, "error": "Twitch not configured", **_get_community_data(r)}
 
     try:
         token = await get_twitch_token()
@@ -160,7 +166,7 @@ async def get_status():
             cached_raw = r.get("current_stream")
             if cached_raw:
                 # Stream just ended — calculate duration and save
-                cached = json.loads(cached_raw)
+                cached = normalize_session(json.loads(cached_raw))
                 started_at_utc = datetime.fromisoformat(cached["started_at"].replace("Z", "+00:00"))
                 ended_at_utc = datetime.now(timezone.utc)
                 duration_hours = round((ended_at_utc - started_at_utc).total_seconds() / 3600, 2)
@@ -188,8 +194,10 @@ async def get_status():
 
 def _save_completed_stream(r, session: dict, duration_hours: float):
     """Append a completed stream to the history list."""
+    session = normalize_session(session)
     raw = r.get("streams")
     streams = json.loads(raw) if raw else []
+    
 
     # Don't double-save the same session
     for s in streams:
