@@ -794,19 +794,23 @@ async function voteLength(btn, key) {
 function renderAll() {
   let trustStreams = streams;
 
-  const noStreamDay = isNoStreamDayPT();
+  const totalVotesNow = (votes.ontime || 0) + (votes.late || 0);
+  const nowLate = calcLateMinsRightNow() > 0;
 
-  if (!noStreamDay && !streamsAlreadyContainToday(streams)) {
+  // Inject a "today" record if:
+  // - we don't already have today in history, AND
+  // - he's live OR he's late OR people have voted
+  if (!streamsAlreadyContainToday(streams) && (liveData || nowLate || totalVotesNow > 0)) {
     const todaySynthetic = buildTodaySyntheticStream();
 
-    const totalVotesNow = (votes.ontime || 0) + (votes.late || 0);
-    const nowLate = todaySynthetic.late_mins > 0;
-
-    if (liveData || nowLate || totalVotesNow > 0) {
-      trustStreams = [...streams, todaySynthetic];
+    // If it's a no-stream day and he's not live, don't punish lateness logic
+    // (still allow votes to affect trust)
+    if (isNoStreamDayPT() && !liveData) {
+      todaySynthetic.late_mins = 0;
     }
-  }
 
+    trustStreams = [...streams, todaySynthetic];
+  }
 
   const trust = calcTrust(trustStreams);
   renderTrust(trust);
