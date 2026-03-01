@@ -213,7 +213,7 @@ def _save_completed_stream(r, session: dict, duration_hours: float):
     lvraw = r.get(lvkey)
 
     day_votes = json.loads(vraw) if vraw else {"ontime": 0, "late": 0}
-    day_len   = json.loads(lvraw) if lvraw else {k: 0 for k in ["under1","1to2","2to3","3to4","over4","ragequit"]}
+    day_len   = json.loads(lvraw) if lvraw else {k: 0 for k in ["lt6","6to8","8to10","10to12","12plus"]}
 
     streams.append({
         "date": date,
@@ -236,7 +236,7 @@ def _get_community_data(r) -> dict:
     sraw  = r.get("streams")
     return {
         "votes":        json.loads(vraw)  if vraw  else {"ontime": 0, "late": 0},
-        "length_votes": json.loads(lvraw) if lvraw else {k: 0 for k in ["under1","1to2","2to3","3to4","over4","ragequit"]},
+        "length_votes": json.loads(lvraw) if lvraw else {k: 0 for k in ["lt6","6to8","8to10","10to12","12plus"]},
         "streams":      json.loads(sraw)  if sraw  else [],
     }
 
@@ -256,7 +256,7 @@ async def get_votes():
     lvraw = r.get(f"length_votes:{today}")
     return {
         "votes":        json.loads(vraw)  if vraw  else {"ontime": 0, "late": 0},
-        "length_votes": json.loads(lvraw) if lvraw else {k: 0 for k in ["under1","1to2","2to3","3to4","over4","ragequit"]},
+        "length_votes": json.loads(lvraw) if lvraw else {k: 0 for k in ["lt6","6to8","8to10","10to12","12plus"]},
         "date": today,
     }
 
@@ -284,7 +284,7 @@ class LengthVoteBody(BaseModel):
 
 @app.post("/api/votes/length")
 async def cast_length_vote(body: LengthVoteBody):
-    valid = {"under1", "1to2", "2to3", "3to4", "over4", "ragequit"}
+    valid = {"lt6", "6to8", "8to10", "10to12", "12plus"}
     if body.bucket not in valid:
         raise HTTPException(status_code=400, detail="Invalid bucket")
     r = get_redis()
