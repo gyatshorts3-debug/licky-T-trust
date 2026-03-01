@@ -79,17 +79,26 @@ def calc_late_mins(start_hhmm: str) -> int:
 
 from fastapi import Response
 
-@app.head("/api/status")
-async def head_status():
-    # IMPORTANT:
-    # UptimeRobot uses HEAD. We still want the side-effects:
-    # - detect live/offline
-    # - save completed streams
-    # - clear current_stream, etc.
-    await get_status()
-    return Response(status_code=200)
+def _try_finalize_stale_current_stream(r: Redis):
+    cached_raw = r.get("current_stream")
+    if not cached_raw:
+        return False
 
-@app.get("/api/status")
+    cached = json.loads(cached_raw)
+    started_at_utc = datetime.fromisoformat(cached["started_at"].replace("Z", "+00:00"))
+    now_utc = datetime.now(timezone.utc)
+    age_minutes = (now_utc - started_at_utc).total_seconds() / 60
+
+    # Don’t finalize if it might still be live (short blips/errors)
+    if age_minutes < 15:
+        return False
+
+    duration_hours = round((now_utc - started_at_utc).total_seconds() / 3600, 2)
+    _save_completed_stream(r, cached, duration_hours)
+    r.delete("current_stream")
+    return True
+
+@app.api_route("/api/status", methods=["GET", "HEAD"])
 async def get_status():
     """
     Poll Twitch. Auto-detect going live and going offline.
@@ -169,7 +178,12 @@ async def get_status():
             }
 
     except Exception as e:
-        return {"live": False, "error": str(e), **_get_community_data(r)}
+        try:
+            r = get_redis()
+            _try_finalize_stale_current_stream(r)
+            return {"live": False, "error": str(e), **_get_community_data(r)}
+        except Exception as e2:
+            return {"live": False, "error": f"{e} | redis_finalize_failed: {e2}", "streams": [], "votes": {}, "length_votes": {}}
 
 
 def _save_completed_stream(r, session: dict, duration_hours: float):
