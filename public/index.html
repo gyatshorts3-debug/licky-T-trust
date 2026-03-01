@@ -378,9 +378,15 @@ let userLenVoted = null;
 
 // ── DAILY RESET — votes stored with today's date key ──────
 function todayKey() {
-  // PST date
-  const pst = new Date(Date.now() - 8 * 3600000);
-  return pst.toISOString().slice(0, 10);
+  const pt = getPT();
+  const y = pt.getFullYear();
+  const m = String(pt.getMonth() + 1).padStart(2, '0');
+  const d = String(pt.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function getPST() { // keep name if you want, but it's PT
+  return getPT();
 }
 
 function loadLocalVoteState() {
@@ -399,7 +405,6 @@ function saveLocalVote(type)    { localStorage.setItem('vote_'    + todayKey(), 
 function saveLocalLenVote(type) { localStorage.setItem('voteLen_' + todayKey(), type); }
 
 // ── HELPERS ───────────────────────────────────────────────
-function getPST() { return new Date(Date.now() - 8 * 3600000); }
 
 function fmtTime(h, m) {
   const ap = h >= 12 ? 'PM' : 'AM';
@@ -463,23 +468,19 @@ function setTwitchBadge(cls, msg) {
 
 // ── COUNTDOWN ─────────────────────────────────────────────
 function updateCountdown() {
-  const now    = getPST();
-  const target = new Date(now); target.setUTCHours(17,0,0,0);
-  const diff   = target - now;
+  const now = getPST();
 
   const el   = document.getElementById('countdownDisplay');
   const lbl  = document.getElementById('countdownLabel');
   const pill = document.getElementById('statusPill');
 
-  if (liveData) {
-    const started = new Date(liveData.started_at);
-    const secs    = Math.floor((Date.now() - started) / 1000);
-    const h=Math.floor(secs/3600), m=Math.floor((secs%3600)/60), s=secs%60;
-    el.className   = 'countdown-display live';
-    el.textContent = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
-    lbl.textContent       = '🟢 LIVE NOW — STREAMING FOR';
-    pill.className        = 'status-pill pill-live';
-    pill.textContent      = '🔴 HE\'S LIVE';
+  // ✅ Saturday = no stream day
+  if (isNoStreamDayPT(now) && !liveData) {
+    el.className   = 'countdown-display waiting';
+    el.textContent = `--:--:--`;
+    lbl.textContent  = '🚫 NO STREAM SCHEDULED (SATURDAY)';
+    pill.className   = 'status-pill pill-waiting';
+    pill.textContent = 'OFF DAY';
     return;
   }
 
@@ -591,11 +592,25 @@ function buildTodaySyntheticStream() {
   };
 }
 
+
+function getPT() {
+  // Robust PT wall-clock date (handles DST correctly)
+  return new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
+}
+
+function isNoStreamDayPT(d = getPT()) {
+  // Saturday = 6
+  return d.getDay() === 6;
+}
+  
 function calcTrust(streams) {
+  const HARD_WEIGHT  = 1;
+  const CROWD_WEIGHT = 4; // 4x influence vs hard score
   if (!streams.length) return { score:50, ontimeCount:0, lateCount:0, avgLate:0 };
 
   let on=0, late=0, totalLate=0;
   let blendedSum = 0;
+  
 
   streams.forEach(s => {
     const late_mins = s.late_mins ?? (() => {
@@ -613,8 +628,10 @@ function calcTrust(streams) {
     const crowd = crowdScoreFromVotes(s.votes || null);
 
     // TRUE equal influence:
-    const scoreThis = Math.round(0.5 * hard + 0.5 * crowd);
+    const denom = HARD_WEIGHT + CROWD_WEIGHT;
+    const scoreThis = Math.round((HARD_WEIGHT * hard + CROWD_WEIGHT * crowd) / denom);
     blendedSum += scoreThis;
+    
   });
 
   const avgLate = late ? Math.round(totalLate / late) : 0;
@@ -777,12 +794,11 @@ async function voteLength(btn, key) {
 function renderAll() {
   let trustStreams = streams;
 
-  // Add a live "today" entry if today isn't already logged in history.
-  if (!streamsAlreadyContainToday(streams)) {
+  const noStreamDay = isNoStreamDayPT();
+
+  if (!noStreamDay && !streamsAlreadyContainToday(streams)) {
     const todaySynthetic = buildTodaySyntheticStream();
 
-    // Only include if it’s meaningful:
-    // - either live, OR past scheduled time, OR there are any votes today
     const totalVotesNow = (votes.ontime || 0) + (votes.late || 0);
     const nowLate = todaySynthetic.late_mins > 0;
 
@@ -791,10 +807,10 @@ function renderAll() {
     }
   }
 
+
   const trust = calcTrust(trustStreams);
   renderTrust(trust);
 
-  // Engine/shame/recent should still use REAL history only (optional)
   renderEngine(streams);
   renderShame(streams);
   renderRecent(streams);
