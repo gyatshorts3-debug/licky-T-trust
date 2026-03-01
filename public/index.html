@@ -643,9 +643,10 @@ function calcTrust(streams) {
       return Math.max(0, h*60+m - SCHEDULED_MIN);
     })();
 
-    if (late_mins <= 2) on++;
-    else { late++; totalLate += late_mins; }
-
+    if (!s._synthetic) {
+      if (late_mins <= 2) on++;
+      else { late++; totalLate += late_mins; }
+    }
     const hard  = hardScoreFromLate(late_mins);
 
     // Use persisted votes for that stream-day if present.
