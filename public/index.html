@@ -254,7 +254,7 @@
           <circle cx="170" cy="175" r="3" fill="white"/>
         </g>
         <text id="gaugeCenterScore" x="170" y="155" fill="white" font-family="Bebas Neue, sans-serif" font-size="36" text-anchor="middle">--</text>
-        <text x="170" y="170" fill="#556677" font-family="Share Tech Mono, monospace" font-size="9" text-anchor="middle">/100</text>
+        <!-- <text x="170" y="170" fill="#556677" font-family="Share Tech Mono, monospace" font-size="9" text-anchor="middle">/100</text> -->
       </svg>
       <div class="trust-label-text" id="trustLabelText" style="color:var(--yellow)">CALCULATING...</div>
     </div>
@@ -274,8 +274,8 @@
       <div class="bet-title">🎰 ON TIME OR LATE?</div>
       <div class="bet-subtitle">↻ RESETS DAILY · VOTE ONCE PER DAY</div>
       <div class="vote-buttons">
-        <button class="vote-btn green" id="btnOnTime" onclick="vote('ontime')">🟢 ON TIME<br><small style="font-size:12px;font-family:'Share Tech Mono'">(lol)</small></button>
-        <button class="vote-btn red"   id="btnLate"   onclick="vote('late')">🔴 LATE<br><small style="font-size:12px;font-family:'Share Tech Mono'">(obviously)</small></button>
+        <button class="vote-btn green" id="btnOnTime" onclick="vote('ontime')">🟢 ON TIME<br><small style="font-size:12px;font-family:'Share Tech Mono'"></small></button>
+        <button class="vote-btn red"   id="btnLate"   onclick="vote('late')">🔴 LATE<br><small style="font-size:12px;font-family:'Share Tech Mono'"></small></button>
       </div>
       <div class="vote-bar-labels">
         <span style="color:var(--green)" id="pctOnTime">0%</span>
@@ -346,7 +346,7 @@
   <div class="shame-grid">
     <div class="shame-card"><div class="shame-num" id="shame-total"     style="color:var(--text)">--</div><div class="shame-lbl">TOTAL STREAMS TRACKED</div></div>
     <div class="shame-card"><div class="shame-num" id="shame-latecount" style="color:var(--red)">--</div><div class="shame-lbl">STREAMS WHERE HE WAS LATE</div></div>
-    <div class="shame-card"><div class="shame-num" id="shame-record"    style="color:var(--red)">--m</div><div class="shame-lbl">RECORD LATENESS 💀</div></div>
+    <div class="shame-card"><div class="shame-num" id="shame-record"    style="color:var(--red)">--m</div><div class="shame-lbl">RECORD LATENESS</div></div>
     <div class="shame-card"><div class="shame-num" id="shame-longest"   style="color:var(--green)">--h</div><div class="shame-lbl">LONGEST STREAM</div></div>
   </div>
 
