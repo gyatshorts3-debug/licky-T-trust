@@ -297,12 +297,11 @@
       <div class="bet-title">⏱️ HOW LONG WILL HE STREAM?</div>
       <div class="bet-subtitle">↻ RESETS DAILY · VOTE ONCE PER DAY</div>
       <div class="length-options">
-        <button class="len-btn" data-key="under1"   onclick="voteLength(this,'under1')">Under 1hr</button>
-        <button class="len-btn" data-key="1to2"     onclick="voteLength(this,'1to2')">1–2 hrs</button>
-        <button class="len-btn" data-key="2to3"     onclick="voteLength(this,'2to3')">2–3 hrs</button>
-        <button class="len-btn" data-key="3to4"     onclick="voteLength(this,'3to4')">3–4 hrs</button>
-        <button class="len-btn" data-key="over4"    onclick="voteLength(this,'over4')">4+ hrs</button>
-        <button class="len-btn" data-key="ragequit" onclick="voteLength(this,'ragequit')">💀 Rage quit</button>
+        <button class="len-btn" data-key="lt6"     onclick="voteLength(this,'lt6')">&lt; 6 hrs</button>
+        <button class="len-btn" data-key="6to8"    onclick="voteLength(this,'6to8')">6–8 hrs</button>
+        <button class="len-btn" data-key="8to10"   onclick="voteLength(this,'8to10')">8–10 hrs</button>
+        <button class="len-btn" data-key="10to12"  onclick="voteLength(this,'10to12')">10–12 hrs</button>
+        <button class="len-btn" data-key="12plus"  onclick="voteLength(this,'12plus')">12+ hrs</button>
       </div>
       <div class="len-bar-wrap" id="lenBars"></div>
     </div>
@@ -365,8 +364,14 @@
 <script>
 // ── CONFIG ────────────────────────────────────────────────
 const SCHEDULED_MIN  = 17 * 60; // 5pm PST
-const LENGTH_KEYS    = ['under1','1to2','2to3','3to4','over4','ragequit'];
-const LENGTH_LABELS  = { under1:'< 1hr','1to2':'1–2h','2to3':'2–3h','3to4':'3–4h',over4:'4+h',ragequit:'💀 Quit' };
+const LENGTH_KEYS   = ['lt6','6to8','8to10','10to12','12plus'];
+const LENGTH_LABELS = {
+  lt6:    '< 6h',
+  '6to8': '6–8h',
+  '8to10':'8–10h',
+  '10to12':'10–12h',
+  '12plus':'12+',
+};
 
 // ── STATE ─────────────────────────────────────────────────
 let streams      = [];
