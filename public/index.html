@@ -505,7 +505,16 @@ function updateCountdown() {
   
   const scheduled = getScheduledStreamTimePT(now);
   const diff = scheduled - now; // milliseconds
-  
+
+  if (liveData) {
+    el.className = 'countdown-display live';
+    el.textContent = 'LIVE';
+    lbl.textContent = '✅ STREAM IS LIVE';
+    pill.className = 'status-pill pill-live';
+    pill.textContent = '🟢 LIVE NOW';
+    return;
+  }
+    
   // Saturday = no stream day
   if (isNoStreamDayPT(now) && !liveData) {
     el.className   = 'countdown-display waiting';
