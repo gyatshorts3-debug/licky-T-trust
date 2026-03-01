@@ -473,8 +473,11 @@ function updateCountdown() {
   const el   = document.getElementById('countdownDisplay');
   const lbl  = document.getElementById('countdownLabel');
   const pill = document.getElementById('statusPill');
-
-  // ✅ Saturday = no stream day
+  
+  const scheduled = getScheduledStreamTimePT(now);
+  const diff = scheduled - now; // milliseconds
+  
+  // Saturday = no stream day
   if (isNoStreamDayPT(now) && !liveData) {
     el.className   = 'countdown-display waiting';
     el.textContent = `--:--:--`;
@@ -483,9 +486,12 @@ function updateCountdown() {
     pill.textContent = 'OFF DAY';
     return;
   }
-
+  
   if (diff > 0) {
-    const h=Math.floor(diff/3600000), m=Math.floor((diff%3600000)/60000), s=Math.floor((diff%60000)/1000);
+    const h=Math.floor(diff/3600000),
+          m=Math.floor((diff%3600000)/60000),
+          s=Math.floor((diff%60000)/1000);
+  
     el.className   = 'countdown-display waiting';
     el.textContent = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
     lbl.textContent  = 'TIME UNTIL SCHEDULED STREAM';
@@ -493,7 +499,11 @@ function updateCountdown() {
     pill.textContent = '⏳ NOT LIVE YET';
   } else {
     const late = Math.abs(diff);
-    const h=Math.floor(late/3600000), m=Math.floor((late%3600000)/60000), s=Math.floor((late%60000)/1000);
+  
+    const h=Math.floor(late/3600000),
+          m=Math.floor((late%3600000)/60000),
+          s=Math.floor((late%60000)/1000);
+  
     el.className   = 'countdown-display late';
     el.textContent = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
     lbl.textContent  = '⚠️ HE\'S LATE — OVERDUE BY';
