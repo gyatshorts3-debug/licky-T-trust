@@ -466,6 +466,13 @@ function setTwitchBadge(cls, msg) {
   document.getElementById('twitchStatus').textContent = msg;
 }
 
+function getScheduledStreamTimePT(nowPT = getPT()) {
+  // returns a Date object for today's scheduled stream time in PT (5:00 PM)
+  const scheduled = new Date(nowPT);
+  scheduled.setHours(17, 0, 0, 0); // 5:00 PM PT
+  return scheduled;
+}
+
 // ── COUNTDOWN ─────────────────────────────────────────────
 function updateCountdown() {
   const now = getPST();
