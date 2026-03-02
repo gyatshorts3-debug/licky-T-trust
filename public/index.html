@@ -399,6 +399,9 @@ let liveData     = null;
 let userVoted    = null;
 let userLenVoted = null;
 
+const LATE_GRACE_MINS = 20;
+const LATE_GRACE_MS = LATE_GRACE_MINS * 60 * 1000;
+
 // ── DAILY RESET — votes stored with today's date key ──────
 
 
@@ -520,9 +523,9 @@ function updateCountdown() {
   const el   = document.getElementById('countdownDisplay');
   const lbl  = document.getElementById('countdownLabel');
   const pill = document.getElementById('statusPill');
-  
+
   const scheduled = getScheduledStreamTimePT(now);
-  const diff = scheduled - now; // milliseconds
+  const diff = scheduled - now; // ms until 5:00 (negative after)
 
   if (liveData) {
     el.className = 'countdown-display live';
@@ -532,7 +535,7 @@ function updateCountdown() {
     pill.textContent = '🟢 LIVE NOW';
     return;
   }
-    
+
   // Saturday = no stream day
   if (isNoStreamDayPT(now) && !liveData) {
     el.className   = 'countdown-display waiting';
@@ -542,44 +545,57 @@ function updateCountdown() {
     pill.textContent = 'OFF DAY';
     return;
   }
-  
+
+  // BEFORE 5:00
   if (diff > 0) {
     const h=Math.floor(diff/3600000),
           m=Math.floor((diff%3600000)/60000),
           s=Math.floor((diff%60000)/1000);
-  
+
     el.className   = 'countdown-display waiting';
     el.textContent = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
     lbl.textContent  = 'TIME UNTIL SCHEDULED STREAM';
     pill.className   = 'status-pill pill-waiting';
     pill.textContent = '⏳ NOT LIVE YET';
-  } else {
-    const late = Math.abs(diff);
-  
-    const h=Math.floor(late/3600000),
-          m=Math.floor((late%3600000)/60000),
-          s=Math.floor((late%60000)/1000);
-  
-    el.className   = 'countdown-display late';
-    el.textContent = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
-    lbl.textContent  = '⚠️ HE\'S LATE — OVERDUE BY';
-    pill.className   = 'status-pill pill-late';
-    pill.textContent = '🔴 NOT LIVE — RUNNING LATE';
+    return;
   }
-}
 
+  // GRACE WINDOW: 5:00 → 5:15 (diff is 0 to -15m)
+  if (diff > -LATE_GRACE_MS) {
+    const graceLeft = LATE_GRACE_MS - Math.abs(diff);
+    const m = Math.floor(graceLeft / 60000);
+    const s = Math.floor((graceLeft % 60000) / 1000);
+
+    // re-use "waiting" styling so it doesn't look like "late"
+    el.className   = 'countdown-display waiting';
+    el.textContent = `00:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+    lbl.textContent  = '🟡 GRACE WINDOW — SHOULD BE LIVE SOON';
+    pill.className   = 'status-pill pill-waiting';
+    pill.textContent = `🟡 GRACE · ${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')} LEFT`;
+    return;
+  }
+
+  // ACTUALLY LATE: after 5:15
+  const late = Math.abs(diff) - LATE_GRACE_MS;
+  const h=Math.floor(late/3600000),
+        m=Math.floor((late%3600000)/60000),
+        s=Math.floor((late%60000)/1000);
+
+  el.className   = 'countdown-display late';
+  el.textContent = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+  lbl.textContent  = '⚠️ HE\'S LATE — OVERDUE BY';
+  pill.className   = 'status-pill pill-late';
+  pill.textContent = '🔴 NOT LIVE — RUNNING LATE';
+}
 // ── TRUST SCORE ───────────────────────────────────────────
 function clamp(n, a, b){ return Math.max(a, Math.min(b, n)); }
 
 function hardScoreFromLate(lateMins) {
-  // 0–2 minutes = perfect
-  if (lateMins <= 2) return 100;
+  // within grace => lateMins is 0
+  if (lateMins <= 0) return 100;
 
-  // Simple linear decay after grace:
-  // 10 mins late -> 84
-  // 30 mins late -> 44
-  // 52+ mins late -> 0
-  const score = 100 - (lateMins - 2) * 2;
+  // linear decay: 0 min late = 100, 50 min late = 0 (tune slope if you want)
+  const score = 100 - lateMins * 2;
   return clamp(Math.round(score), 0, 100);
 }
 
@@ -598,11 +614,11 @@ function isSameDayPST(dateISO, pstDateKey) {
 function calcLateMinsFromStartedAtUTC(startedAtISO) {
   const utc = new Date(startedAtISO); // real UTC instant
   const pt = new Date(utc.toLocaleString('en-US', { timeZone: 'America/Los_Angeles' })); // PT wall-clock
-  return Math.max(0, ptMinutesSinceMidnight(pt) - SCHEDULED_MIN);
+  return Math.max(0, ptMinutesSinceMidnight(pt) - (SCHEDULED_MIN + LATE_GRACE_MINS));
 }
 
 function calcLateMinsRightNow() {
-  return Math.max(0, ptMinutesSinceMidnight() - SCHEDULED_MIN);
+  return Math.max(0, ptMinutesSinceMidnight() - (SCHEDULED_MIN + LATE_GRACE_MINS));
 }
 
 function streamsAlreadyContainToday(streamsArr) {
@@ -645,10 +661,6 @@ function buildTodaySyntheticStream() {
 }
 
 
-function getPT() {
-  // Robust PT wall-clock date (handles DST correctly)
-  return new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
-}
 
 function isNoStreamDayPT(d = getPT()) {
   // Saturday = 6
@@ -671,7 +683,7 @@ function calcTrust(streams) {
     })();
 
     if (!s._synthetic) {
-      if (late_mins <= 2) on++;
+      if (late_mins === 0) on++;
       else { late++; totalLate += late_mins; }
     }
     const hard  = hardScoreFromLate(late_mins);
@@ -720,7 +732,7 @@ function renderEngine(streams) {
   streams.forEach(s => {
     const lm = s.late_mins ?? 0;
     lateMinsArr.push(lm);
-    if (lm > 2) lateCount++;
+    if (lm > 0) lateCount++;
     if (s.duration) durs.push(parseFloat(s.duration));
   });
 
@@ -755,7 +767,7 @@ function renderShame(streams) {
   let late=0, maxLate=0, maxDur=0;
   streams.forEach(s => {
     const lm = s.late_mins ?? 0;
-    if (lm > 2) { late++; if(lm>maxLate) maxLate=lm; }
+    if (lm > 0) { late++; if(lm>maxLate) maxLate=lm; }
     if (s.duration && parseFloat(s.duration) > maxDur) maxDur = parseFloat(s.duration);
   });
   document.getElementById('shame-total').textContent     = streams.length || '--';
@@ -772,7 +784,7 @@ function renderRecent(streams) {
   }
   el.innerHTML = [...streams].reverse().slice(0, 8).map(s => {
     const lm   = s.late_mins ?? 0;
-    const isLate = lm > 2;
+    const isLate = lm > 0;
     const badge  = isLate
       ? `<span class="stream-badge badge-late">LATE +${lm}m</span>`
       : `<span class="stream-badge badge-ontime">ON TIME</span>`;
