@@ -36,7 +36,7 @@ KV_URL               = os.environ.get("KV_REST_API_URL", "")
 KV_TOKEN             = os.environ.get("KV_REST_API_TOKEN", "")
 
 SCHEDULED_HOUR_pt = 17  # 5:00 PM pt
-LATE_GRACE_MINS    = 2   # 2 min grace period before counted as late
+LATE_GRACE_MINS    = 20   # 20 min grace period before counted as late
 
 # ── REDIS ────────────────────────────────────────────────
 def get_redis():
@@ -73,7 +73,8 @@ def calc_late_mins(start_hhmm: str) -> int:
     h, m = map(int, start_hhmm.split(":"))
     actual_mins = h * 60 + m
     scheduled_mins = SCHEDULED_HOUR_pt * 60
-    return max(0, actual_mins - scheduled_mins)
+    # grace applied universally
+    return max(0, actual_mins - (scheduled_mins + LATE_GRACE_MINS))
 
 # ── ROUTES ───────────────────────────────────────────────
 
