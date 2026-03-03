@@ -189,6 +189,31 @@
   .stream-date  { color:var(--dim); flex:1; }
   .stream-info  { color:var(--text); }
 
+
+  /* RANGE FLOAT ANIMATION (bar moves slowly inside predicted range) */
+  .range-float {
+    --min: 0;   /* 0..1 */
+    --max: 0;   /* 0..1 */
+    width: 100%;
+    transform-origin: left center;
+    animation: floatRange 4.5s ease-in-out infinite;
+    will-change: transform;
+  }
+  @keyframes floatRange {
+    0%, 100% { transform: scaleX(var(--min)); }
+    50%      { transform: scaleX(var(--max)); }
+  }
+
+  /* optional: slight "breathing" glow */
+  .range-glow {
+    animation: floatRange 4.5s ease-in-out infinite, glowPulse 2.8s ease-in-out infinite;
+  }
+  @keyframes glowPulse {
+    0%,100% { filter: drop-shadow(0 0 0 rgba(0,0,0,0)); opacity: 0.95; }
+    50%     { filter: drop-shadow(0 0 6px rgba(255,255,255,0.08)); opacity: 1; }
+  }
+
+
   /* ── DAILY RESET NOTE ── */
   .reset-note { font-family:'Share Tech Mono',monospace; font-size:10px; color:var(--dim); text-align:center; padding:12px; letter-spacing:1px; }
 
@@ -337,7 +362,7 @@
       <div class="engine-stat">
         <div class="e-label">LATE PROBABILITY</div>
         <div class="e-value" id="eng-lateprob" style="color:var(--red)">--%</div>
-        <div class="conf-bar-wrap"><div class="conf-bar-track"><div class="conf-bar-fill" id="eng-lateprob-bar" style="width:0%;background:var(--red)"></div></div></div>
+        <div class="conf-bar-wrap"><div class="conf-bar-track"><div class="conf-bar-fill range-float range-glow" id="eng-lateprob-bar" style="transform:scaleX(0);background:var(--red)"></div></div></div>
         <div class="e-sub" id="eng-lateprob-sub">Awaiting stream data</div>
       </div>
       <div class="engine-stat">
@@ -353,7 +378,7 @@
       <div class="engine-stat">
         <div class="e-label">CONFIDENCE SCORE</div>
         <div class="e-value" id="eng-confidence" style="color:var(--green)">--%</div>
-        <div class="conf-bar-wrap"><div class="conf-bar-track"><div class="conf-bar-fill" id="eng-conf-bar" style="width:0%;background:var(--green)"></div></div></div>
+        <div class="conf-bar-wrap"><div class="conf-bar-track"><div class="conf-bar-fill range-float" id="eng-conf-bar" style="transform:scaleX(0);background:var(--green)"></div></div></div>
         <div class="e-sub" id="eng-conf-sub">More streams = more accuracy</div>
       </div>
     </div>
@@ -725,41 +750,146 @@ function renderTrust(t) {
   document.getElementById('stat-avg').textContent    = avgLate + 'm';
 }
 
+function clamp01(x){ return Math.max(0, Math.min(1, x)); }
+function clamp(n, a, b){ return Math.max(a, Math.min(b, n)); }
+
+function mean(arr){
+  if (!arr.length) return 0;
+  return arr.reduce((a,b)=>a+b,0) / arr.length;
+}
+function stdev(arr){
+  if (arr.length < 2) return 0;
+  const m = mean(arr);
+  const v = mean(arr.map(x => (x-m)*(x-m)));
+  return Math.sqrt(v);
+}
+function quantile(sortedArr, q){
+  // sortedArr must be sorted ascending
+  if (!sortedArr.length) return 0;
+  const pos = (sortedArr.length - 1) * q;
+  const base = Math.floor(pos);
+  const rest = pos - base;
+  if (sortedArr[base + 1] === undefined) return sortedArr[base];
+  return sortedArr[base] + rest * (sortedArr[base + 1] - sortedArr[base]);
+}
+
+function fmtTimeFromMinutes(mins){
+  mins = ((mins % (24*60)) + (24*60)) % (24*60);
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return fmtTime(h, m);
+}
+
+// Normal approx interval for a Beta(a,b) posterior (good enough for UI).
+// If you want exact Beta quantiles later, we can do a tighter impl,
+// but this is already “real math” and behaves well for small n when padded.
+function betaCredibleInterval(lateCount, total, z = 1.28 /* ~80% */){
+  // prior Beta(1,1)
+  const a = 1 + lateCount;
+  const b = 1 + (total - lateCount);
+  const mu = a / (a + b);
+  const varApprox = (a*b) / ((a+b)*(a+b)*(a+b+1));
+  const sd = Math.sqrt(varApprox);
+  let lo = mu - z*sd;
+  let hi = mu + z*sd;
+
+  // extra widening for tiny samples
+  const widen = total < 6 ? (0.10) : total < 12 ? (0.06) : 0.03;
+  lo -= widen; hi += widen;
+
+  return { lo: clamp01(lo), hi: clamp01(hi), mu: clamp01(mu) };
+}
+
 // ── ENGINE PREDICTION ─────────────────────────────────────
 function renderEngine(streams) {
-  if (!streams.length) return;
-  let lateMinsArr=[], durs=[], lateCount=0;
-  streams.forEach(s => {
-    const lm = s.late_mins ?? 0;
-    lateMinsArr.push(lm);
-    if (lm > 0) lateCount++;
-    if (s.duration) durs.push(parseFloat(s.duration));
-  });
+  if (!streams.length) {
+    document.getElementById('eng-lateprob-sub').textContent = 'Awaiting stream data';
+    return;
+  }
 
-  const lateProb   = Math.round((lateCount / streams.length) * 100);
-  const avgLate    = Math.round(lateMinsArr.reduce((a,b)=>a+b,0) / lateMinsArr.length);
-  const predMin    = SCHEDULED_MIN + avgLate;
-  const avgDur     = durs.length ? durs.reduce((a,b)=>a+b,0) / durs.length : null;
-  const confidence = Math.min(95, 40 + streams.length * 7);
+  // Use only real historical streams (not synthetic today) for engine
+  const hist = streams.filter(s => !s._synthetic);
 
-  document.getElementById('eng-lateprob').textContent     = lateProb + '%';
-  document.getElementById('eng-lateprob-bar').style.width = lateProb + '%';
-  document.getElementById('eng-lateprob-sub').textContent = `${lateCount} of ${streams.length} streams late`;
-  document.getElementById('eng-starttime').textContent    = fmtTime(Math.floor(predMin/60), predMin%60);
-  document.getElementById('eng-starttime-sub').textContent= `PST · avg ${avgLate}min delay`;
+  if (!hist.length) return;
 
-  if (avgDur) {
-    const dh=Math.floor(avgDur), dm=Math.round((avgDur-dh)*60);
-    document.getElementById('eng-duration').textContent     = `${dh}h ${dm}m`;
-    document.getElementById('eng-duration-sub').textContent = `avg over ${durs.length} streams`;
+  // Extract lateness + duration distributions
+  const lateMinsArr = hist.map(s => Math.max(0, s.late_mins ?? 0));
+  const lateFlags   = lateMinsArr.map(x => x > 0);
+  const lateCount   = lateFlags.filter(Boolean).length;
+  const n           = hist.length;
+
+  const durs = hist
+    .map(s => (s.duration != null ? parseFloat(s.duration) : null))
+    .filter(x => Number.isFinite(x) && x > 0);
+
+  // ── 1) Late probability range (Bayesian Beta-Binomial) ─────────────
+  const prob = betaCredibleInterval(lateCount, n, 1.28); // 80% band
+  const probLoPct = Math.round(prob.lo * 100);
+  const probHiPct = Math.round(prob.hi * 100);
+  const probMuPct = Math.round(prob.mu * 100);
+
+  const barLP = document.getElementById('eng-lateprob-bar');
+  barLP.style.setProperty('--min', (prob.lo).toFixed(4));
+  barLP.style.setProperty('--max', (prob.hi).toFixed(4));
+
+  document.getElementById('eng-lateprob').textContent     = `${probLoPct}–${probHiPct}%`;
+  document.getElementById('eng-lateprob-sub').textContent = `${lateCount} of ${n} late (posterior mean ~${probMuPct}%)`;
+
+  // ── 2) Predicted start time range (prediction interval on lateness) ─
+  const lateSorted = [...lateMinsArr].sort((a,b)=>a-b);
+
+  // Use robust middle band; 20–80 is “stable”, widen if small n
+  const qLo = n < 10 ? 0.15 : 0.20;
+  const qHi = n < 10 ? 0.85 : 0.80;
+
+  const lateLo = Math.round(quantile(lateSorted, qLo));
+  const lateHi = Math.round(quantile(lateSorted, qHi));
+
+  const startLo = SCHEDULED_MIN + lateLo;
+  const startHi = SCHEDULED_MIN + lateHi;
+
+  document.getElementById('eng-starttime').textContent =
+    `${fmtTimeFromMinutes(startLo)}–${fmtTimeFromMinutes(startHi)}`;
+  document.getElementById('eng-starttime-sub').textContent =
+    `PST · predicted lateness ${lateLo}–${lateHi} min`;
+
+  // ── 3) Predicted duration range (distribution interval) ─────────────
+  if (durs.length >= 3) {
+    const dSorted = [...durs].sort((a,b)=>a-b);
+    const dLo = quantile(dSorted, durs.length < 10 ? 0.20 : 0.25);
+    const dHi = quantile(dSorted, durs.length < 10 ? 0.80 : 0.75);
+
+    const loH = Math.floor(dLo), loM = Math.round((dLo - loH) * 60);
+    const hiH = Math.floor(dHi), hiM = Math.round((dHi - hiH) * 60);
+
+    document.getElementById('eng-duration').textContent     = `${loH}h ${loM}m–${hiH}h ${hiM}m`;
+    document.getElementById('eng-duration-sub').textContent = `Based on ${durs.length} durations`;
   } else {
     document.getElementById('eng-duration').textContent     = 'Building...';
     document.getElementById('eng-duration-sub').textContent = 'Need more stream data';
   }
 
-  document.getElementById('eng-confidence').textContent    = Math.round(confidence) + '%';
-  document.getElementById('eng-conf-bar').style.width      = confidence + '%';
-  document.getElementById('eng-conf-sub').textContent      = `Based on ${streams.length} streams`;
+  // ── 4) Confidence score (sample size + noise) ───────────────────────
+  const lateSd = stdev(lateMinsArr);
+  const durSd  = durs.length >= 2 ? stdev(durs) : 999;
+
+  // Higher n => higher confidence; higher variance => lower confidence
+  let conf = 35 + Math.min(45, n * 6);     // size term (caps)
+  conf -= Math.min(20, lateSd / 3);        // lateness volatility penalty
+  conf -= Math.min(15, durSd * 2);         // duration volatility penalty
+
+  conf = clamp(Math.round(conf), 5, 95);
+
+  // You can either float this bar in a small band, or set it fixed.
+  const confMin = clamp01((conf - 6) / 100);
+  const confMax = clamp01((conf + 6) / 100);
+
+  const barC = document.getElementById('eng-conf-bar');
+  barC.style.setProperty('--min', confMin.toFixed(4));
+  barC.style.setProperty('--max', confMax.toFixed(4));
+
+  document.getElementById('eng-confidence').textContent = conf + '%';
+  document.getElementById('eng-conf-sub').textContent   = `n=${n} · volatility-adjusted`;
 }
 
 // ── SHAME + RECENT ────────────────────────────────────────
