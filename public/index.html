@@ -925,40 +925,28 @@
              `PST · ~${loPastGrace}–${hiPastGrace}m past grace (20m grace applied)`;
          }
          
-          // ── 3) Predicted duration (single value, stabilized mean) ─────────────
-         if (durs.length >= 1) {
-         
-           const BASELINE = 8; // fallback assumption (hours) — adjust if needed
-         
-           const rawMean =
-             durs.reduce((a, b) => a + b, 0) / durs.length;
-         
-           // Shrink toward baseline when sample size is small
-           const shrinkWeight = Math.min(1, durs.length / 6); 
-           // n=1 → 0.16
-           // n=2 → 0.33
-           // n=3 → 0.5
-           // n=6+ → 1 (pure mean)
-         
-           const predicted = rawMean * shrinkWeight + BASELINE * (1 - shrinkWeight);
-         
-           const h = Math.floor(predicted);
-           const m = Math.round((predicted - h) * 60);
-         
-           document.getElementById('eng-duration').textContent =
-             `${h}h ${String(m).padStart(2,'0')}m`;
-         
-           document.getElementById('eng-duration-sub').textContent =
-             `Weighted avg · n=${durs.length}`;
-         
-         } else {
-         
-           document.getElementById('eng-duration').textContent = '--';
-           document.getElementById('eng-duration-sub').textContent =
-             'No duration data yet';
-         
-         }
-         
+         // ── 3) Predicted duration (single value, NO shrink) ───────────────────
+          if (durs.length >= 1) {
+            const mean = durs.reduce((a, b) => a + b, 0) / durs.length;
+
+            // volatility (population SD) just for the subtitle
+            const variance =
+              durs.reduce((acc, x) => acc + Math.pow(x - mean, 2), 0) / durs.length;
+            const sd = Math.sqrt(variance); // hours
+
+            const h = Math.floor(mean);
+            const m = Math.round((mean - h) * 60);
+
+            document.getElementById('eng-duration').textContent =
+              `${h}h ${String(m).padStart(2, '0')}m`;
+
+            document.getElementById('eng-duration-sub').textContent =
+              `avg ${mean.toFixed(2)}h · ±${Math.round(sd * 60)}m volatility · n=${durs.length}`;
+          } else {
+            document.getElementById('eng-duration').textContent = '--';
+            document.getElementById('eng-duration-sub').textContent = 'No duration data yet';
+          }
+                  
            // ── 4) Confidence score (range text matches jiggle) ──────────────────
            const lateSd = stdev(lateMinsArr);
            const durSd  = durs.length >= 2 ? stdev(durs) : 999;
