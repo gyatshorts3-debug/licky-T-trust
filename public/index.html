@@ -760,7 +760,7 @@
            const { score, ontimeCount, lateCount, avgLate } = t;
            document.getElementById('needleGroup').style.transform = `rotate(${(score/100)*180-90}deg)`;
            document.getElementById('gaugeArc').style.strokeDashoffset = 439.8 - (score/100)*439.8;
-           document.getElementById('gaugeCenterScore').textContent = score;
+           document.getElementById('gaugeCenterScore').textContent = score + '%';
          
            let color, label;
            if      (score < 20) { color='#ff2233'; label='CERTIFIED LIAR'; }
