@@ -947,24 +947,21 @@
            `<span style="color:${cHi}">${tHi}</span>`;
          
          // Subtitle: talk in "within grace" vs "past grace"
-         const loPastGrace = Math.max(0, lateLo - LATE_GRACE_MINS);
-         const hiPastGrace = Math.max(0, lateHi - LATE_GRACE_MINS);
-         
+         const loPastGrace = lateLo;
+         const hiPastGrace = lateHi;
+
          const subEl = document.getElementById('eng-starttime-sub');
-         
-         if (lateHi <= LATE_GRACE_MINS) {
-           // Entire band is within grace
-           subEl.textContent = `PST · forecast stays within the 20m grace window`;
-         } else if (lateLo < LATE_GRACE_MINS) {
-           // Band crosses grace boundary
-           subEl.textContent =
-             `PST · could still be on-time (within 20m grace), or up to ~${hiPastGrace}m past grace`;
-         } else {
-           // Entire band is past grace
-           subEl.textContent =
-             `PST · ~${loPastGrace}–${hiPastGrace}m past grace (20m grace applied)`;
-         }
-         
+
+         if (lateHi <= 0) {
+            subEl.textContent = `PST · forecast stays within the 20m grace window`;
+          } else if (lateLo <= 0) {
+            subEl.textContent =
+              `PST · could still be within grace, or up to ~${hiPastGrace}m past grace`;
+          } else {
+            subEl.textContent =
+              `PST · ~${loPastGrace}–${hiPastGrace}m past grace`;
+          }
+          
          // ── 3) Predicted duration (single value, NO shrink) ───────────────────
           if (durs.length >= 1) {
             const mean = durs.reduce((a, b) => a + b, 0) / durs.length;
