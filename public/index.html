@@ -920,9 +920,9 @@
          const lateLo = Math.round(quantile(lateSorted, qLo)); // minutes after 5:00
          const lateHi = Math.round(quantile(lateSorted, qHi)); // minutes after 5:00
          
-         const startLo = SCHEDULED_MIN + lateLo;
-         const startHi = SCHEDULED_MIN + lateHi;
-         
+         const startLo = SCHEDULED_MIN + LATE_GRACE_MINS + lateLo;
+         const startHi = SCHEDULED_MIN + LATE_GRACE_MINS + lateHi;
+           
          const tLo = fmtTimeFromMinutes(startLo);
          const tHi = fmtTimeFromMinutes(startHi);
          
