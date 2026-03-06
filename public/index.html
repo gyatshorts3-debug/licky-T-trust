@@ -516,6 +516,48 @@
            }
          }
          
+
+         function historyScoreFromStats(ontimeCount, lateCount, avgLateMins) {
+            const total = ontimeCount + lateCount;
+            if (!total) return 50;
+
+            const ontimeRate = ontimeCount / total; // 0..1
+            let score = ontimeRate * 100;
+
+            // penalty for being late on late days (tune)
+            // ex: avgLate 20m => -10 points, 60m => -30 points
+            const penalty = clamp(avgLateMins / 2, 0, 40);
+            score -= penalty;
+
+            return clamp(Math.round(score), 0, 100);
+          }
+
+          function crowdScoreFromTodayVotes(votesObj) {
+            const on = votesObj?.ontime || 0;
+            const lt = votesObj?.late   || 0;
+            const total = on + lt;
+            if (!total) return 50;
+
+            // Make extremes hit harder (optional, but feels better)
+            // raw: ontime% (0..100)
+            const p = on / total; // 0..1
+
+            // Curve: push away from 50 more aggressively
+            // gamma > 1 makes the majority dominate more
+            const GAMMA = 1.6;
+            const curved = (p**GAMMA) / ((p**GAMMA) + ((1-p)**GAMMA));
+            return clamp(Math.round(curved * 100), 0, 100);
+          }
+
+          function combinedTrustScore(historyScore, crowdScore, nStreams, nVotes) {
+            // weights grow with evidence but cap out
+            const wHist  = Math.min(8, Math.sqrt(Math.max(0, nStreams))); // 0..8
+            const wCrowd = Math.min(8, Math.sqrt(Math.max(0, nVotes)));   // 0..8
+
+            if (wHist + wCrowd === 0) return 50;
+            return Math.round((historyScore * wHist + crowdScore * wCrowd) / (wHist + wCrowd));
+          }
+
          function setTwitchBadge(cls, msg) {
            document.getElementById('twitchDot').className    = 'twitch-dot ' + cls;
            document.getElementById('twitchStatus').textContent = msg;
@@ -686,43 +728,34 @@
            return d.getDay() === 6;
          }
            
-         function calcTrust(streams) {
-           const HARD_WEIGHT  = 2;
-           const CROWD_WEIGHT = 4; 
-           if (!streams.length) return { score:50, ontimeCount:0, lateCount:0, avgLate:0 };
-         
-           let on=0, late=0, totalLate=0;
-           let blendedSum = 0;
-           
-         
-           streams.forEach(s => {
-             const late_mins = s.late_mins ?? (() => {
-               const [h,m] = s.startTime.split(':').map(Number);
-               return Math.max(0, h*60+m - SCHEDULED_MIN);
-             })();
-         
-             if (!s._synthetic) {
-               if (late_mins === 0) on++;
-               else { late++; totalLate += late_mins; }
-             }
-             const hard  = hardScoreFromLate(late_mins);
-         
-             // Use persisted votes for that stream-day if present.
-             // Fallback to null => neutral 50
-             const crowd = crowdScoreFromVotes(s.votes || null);
-         
-             // TRUE equal influence:
-             const denom = HARD_WEIGHT + CROWD_WEIGHT;
-             const scoreThis = Math.round((HARD_WEIGHT * hard + CROWD_WEIGHT * crowd) / denom);
-             blendedSum += scoreThis;
-             
-           });
-         
-           const avgLate = late ? Math.round(totalLate / late) : 0;
-           const score   = Math.round(blendedSum / streams.length);
-         
-           return { score, ontimeCount:on, lateCount:late, avgLate };
-         }
+         function calcTrust(streamsAll) {
+            const hist = (streamsAll || []).filter(s => !s._synthetic);
+
+            // HISTORY STATS
+            let ontimeCount = 0, lateCount = 0, totalLate = 0;
+
+            hist.forEach(s => {
+              const lm = Math.max(0, s.late_mins ?? 0);
+              if (lm === 0) ontimeCount++;
+              else { lateCount++; totalLate += lm; }
+            });
+
+            const avgLate = lateCount ? Math.round(totalLate / lateCount) : 0;
+
+            const historyScore = historyScoreFromStats(ontimeCount, lateCount, avgLate);
+
+            // CROWD (today only)
+            const totalVotesNow = (votes.ontime || 0) + (votes.late || 0);
+            const crowdScore = crowdScoreFromTodayVotes(votes);
+
+            // FINAL COMBINE
+            const score = combinedTrustScore(historyScore, crowdScore, hist.length, totalVotesNow);
+
+            return { score, ontimeCount, lateCount, avgLate, historyScore, crowdScore };
+          }
+                  
+        
+        
          function renderTrust(t) {
            const { score, ontimeCount, lateCount, avgLate } = t;
            document.getElementById('needleGroup').style.transform = `rotate(${(score/100)*180-90}deg)`;
