@@ -612,25 +612,17 @@
          }
          
          function crowdScoreFromVotes(votesObj) {
-              const on = votesObj?.ontime || 0;
-              const lt = votesObj?.late   || 0;
-              const total = on + lt;
-            
-              // Neutral when no votes
-              if (!total) return 50;
-            
-              // Raw crowd percent (0..100)
-              const raw = (on / total) * 100;
-            
-              // Smooth it: pretend there are "prior" neutral votes (half on-time, half late)
-              // Higher prior = less jumpy. Tune 6–12 for your low-vote days.
-              const PRIOR_TOTAL = 10;        // <-- try 10
-              const priorRaw = 50;           // neutral
-            
-              // Weight: with total=5 votes => w = 5/(5+10)=0.33 (so raw only 33% influence)
-              const w = total / (total + PRIOR_TOTAL);
-            
-              return Math.round(priorRaw * (1 - w) + raw * w);
+           const on = votesObj?.ontime || 0;
+           const lt = votesObj?.late   || 0;
+           const total = on + lt;
+           if (!total) return 50;
+         
+           const raw = (on / total) * 100;
+         
+           const PRIOR_TOTAL = 2; // <-- key change: small prior for your 5–7 vote reality
+           const w = total / (total + PRIOR_TOTAL);
+         
+           return Math.round(50 * (1 - w) + raw * w);
          }
 
          
