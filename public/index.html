@@ -930,10 +930,10 @@
          // - <= 5:20 (<= grace) => green
          // - within 5 mins AFTER grace (5:20–5:25) => yellow
          // - beyond that => red
-         function startColor(lateMinsAfter5) {
-           if (lateMinsAfter5 <= LATE_GRACE_MINS) return 'var(--green)';
-           if (lateMinsAfter5 <= LATE_GRACE_MINS + 5) return 'var(--yellow)';
-           return 'var(--red)';
+         function startColor(pastGraceMins) {
+           if (pastGraceMins <= 0) return 'var(--green)';   // within grace
+           if (pastGraceMins <= 5) return 'var(--yellow)';  // barely late
+           return 'var(--red)';                             // actually late
          }
          
          const cLo = startColor(lateLo);
