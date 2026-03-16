@@ -1025,25 +1025,50 @@
            document.getElementById('shame-record').textContent    = maxLate ? maxLate+'m' : '--m';
            document.getElementById('shame-longest').textContent   = maxDur  ? maxDur+'h'  : '--h';
          }
+
+         let recentStreamsVisible = 8;
          
          function renderRecent(streams) {
-           const el = document.getElementById('recentStreams');
-           if (!streams.length) {
-             el.innerHTML = '<div class="empty-state">No streams recorded yet — site auto-logs once licky_T goes live.</div>';
-             return;
-           }
-           el.innerHTML = [...streams].reverse().slice(0, 8).map(s => {
-             const lm   = s.late_mins ?? 0;
-             const isLate = lm > 0;
-             const badge  = isLate
-               ? `<span class="stream-badge badge-late">LATE +${lm}m</span>`
-               : `<span class="stream-badge badge-ontime">ON TIME</span>`;
-             const dur = s.duration ? ` · ${parseFloat(s.duration).toFixed(1)}h stream` : '';
-             const [h,m] = s.startTime.split(':').map(Number);
-             return `<div class="stream-row">${badge}<span class="stream-date">${s.date}</span><span class="stream-info">Started ${fmtTime(h,m)} PST${dur}</span></div>`;
-           }).join('');
+              const el = document.getElementById('recentStreams');
+            
+              if (!streams.length) {
+                el.innerHTML = '<div class="empty-state">No streams recorded yet — site auto-logs once licky_T goes live.</div>';
+                return;
+              }
+            
+              const sorted = [...streams].reverse();
+              const visibleStreams = sorted.slice(0, recentStreamsVisible);
+              const hasMore = sorted.length > recentStreamsVisible;
+            
+              el.innerHTML = `
+                ${visibleStreams.map(s => {
+                  const lm = s.late_mins ?? 0;
+                  const isLate = lm > 0;
+                  const badge = isLate
+                    ? `<span class="stream-badge badge-late">LATE +${lm}m</span>`
+                    : `<span class="stream-badge badge-ontime">ON TIME</span>`;
+            
+                  const dur = s.duration ? ` · ${parseFloat(s.duration).toFixed(1)}h stream` : '';
+                  const [h, m] = s.startTime.split(':').map(Number);
+            
+                  return `<div class="stream-row">${badge}<span class="stream-date">${s.date}</span><span class="stream-info">Started ${fmtTime(h, m)} PST${dur}</span></div>`;
+                }).join('')}
+            
+                ${hasMore ? `
+                  <div style="text-align:center; margin-top:12px;">
+                    <button id="showMoreStreamsBtn" class="vote-btn" style="max-width:260px;" onclick="showMoreStreams()">
+                      SHOW MORE?
+                    </button>
+                  </div>
+                ` : ''}
+              `;
+            }
+
+         function showMoreStreams() {
+           recentStreamsVisible += 8;
+           renderRecent(streams);
          }
-         
+                  
          // ── VOTES ─────────────────────────────────────────────────
          function renderVotes() {
            const total = votes.ontime + votes.late;
