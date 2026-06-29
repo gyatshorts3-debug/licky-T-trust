@@ -35,8 +35,11 @@ STREAMER_LOGIN       = os.environ.get("STREAMER_LOGIN", "licky_t")
 KV_URL               = os.environ.get("KV_REST_API_URL", "")
 KV_TOKEN             = os.environ.get("KV_REST_API_TOKEN", "")
 
-SCHEDULED_HOUR_pt = 17  # 5:00 PM pt
-LATE_GRACE_MINS    = 20   # 20 min grace period before counted as late
+# Scheduled start = 1:40 PM PT (countdown target).
+# Late after 2:00 PM PT (1:40 + 20m grace).
+SCHEDULED_HOUR_PT = 13   # 1 PM
+SCHEDULED_MIN_PT  = 40   # :40
+LATE_GRACE_MINS   = 20   # grace before a stream is counted as late
 
 # ── REDIS ────────────────────────────────────────────────
 def get_redis():
@@ -71,8 +74,8 @@ async def get_twitch_token() -> str:
 
 def calc_late_mins(start_hhmm: str) -> int:
     h, m = map(int, start_hhmm.split(":"))
-    actual_mins = h * 60 + m
-    scheduled_mins = SCHEDULED_HOUR_pt * 60
+    actual_mins    = h * 60 + m
+    scheduled_mins = SCHEDULED_HOUR_PT * 60 + SCHEDULED_MIN_PT
     # grace applied universally
     return max(0, actual_mins - (scheduled_mins + LATE_GRACE_MINS))
 
@@ -220,7 +223,9 @@ def _save_completed_stream(r, session: dict, duration_hours: float):
         "date": date,
         "startTime": session["started_pt"],
         "started_at": session["started_at"],
-        "late_mins": session["late_mins"],
+        # Recompute against the current cutoff at save time
+        # (don't trust the late_mins stamped at go-live).
+        "late_mins": calc_late_mins(session["started_pt"]),
         "duration": duration_hours,
 
         # NEW: persisted community sentiment for that stream-day
@@ -297,3 +302,69 @@ async def cast_length_vote(body: LengthVoteBody):
     r.set(key, json.dumps(votes))
     r.expire(key, 60 * 60 * 48)
     return {"ok": True, "length_votes": votes}
+
+
+# ── ONE-TIME BACKFILL ────────────────────────────────────
+@app.post("/api/admin/recompute-late")
+async def recompute_late(dry_run: bool = False):
+    """
+    One-time backfill: recompute late/on-time for every saved stream dated
+    2026-05-01 or later, using the current cutoff (1:40 PM + 20m grace = 2:00 PM PT).
+
+    Usage:
+      1) POST /api/admin/recompute-late?dry_run=true   -> preview the diff, changes nothing
+      2) POST /api/admin/recompute-late                -> commit the changes (runs once)
+
+    Idempotent: it always recomputes from each stream's recorded start time, so
+    re-running produces the same result. A Redis flag (migration:late_cutoff_2pm)
+    blocks accidental re-commits. To intentionally re-run later, delete that key first.
+    """
+    r = get_redis()
+
+    if not dry_run and r.get("migration:late_cutoff_2pm"):
+        return {
+            "ok": False,
+            "skipped": True,
+            "reason": "already migrated (delete key migration:late_cutoff_2pm to force a re-run)",
+        }
+
+    raw = r.get("streams")
+    streams = json.loads(raw) if raw else []
+
+    changes = []
+    for s in streams:
+        # Only touch streams on/after the cutover date
+        if s.get("date", "") < "2026-05-01":
+            continue
+
+        hhmm = s.get("startTime")
+        if not hhmm and s.get("started_at"):  # fallback for any older record missing startTime
+            dt = datetime.fromisoformat(s["started_at"].replace("Z", "+00:00"))
+            hhmm = pt_time_str(dt)
+        if not hhmm:
+            continue
+
+        old_late = s.get("late_mins", 0)
+        new_late = calc_late_mins(hhmm)
+
+        if old_late != new_late:
+            changes.append({
+                "date": s.get("date"),
+                "startTime": hhmm,
+                "old": f"{old_late}m ({'late' if old_late > 0 else 'ontime'})",
+                "new": f"{new_late}m ({'late' if new_late > 0 else 'ontime'})",
+            })
+            if not dry_run:
+                s["late_mins"] = new_late
+
+    if not dry_run:
+        r.set("streams", json.dumps(streams))
+        r.set("migration:late_cutoff_2pm", pt_today())
+
+    return {
+        "ok": True,
+        "dry_run": dry_run,
+        "total_streams": len(streams),
+        "changed": len(changes),
+        "changes": changes,
+    }
