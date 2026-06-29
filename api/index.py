@@ -306,14 +306,19 @@ async def cast_length_vote(body: LengthVoteBody):
 
 # ── ONE-TIME BACKFILL ────────────────────────────────────
 @app.post("/api/admin/recompute-late")
-async def recompute_late(dry_run: bool = False):
+async def recompute_late(dry_run: bool = False, from_date: str = "2026-06-01"):
     """
     One-time backfill: recompute late/on-time for every saved stream dated
-    2026-05-01 or later, using the current cutoff (1:40 PM + 20m grace = 2:00 PM PT).
+    `from_date` or later, using the current cutoff (1:40 PM + 20m grace = 2:00 PM PT).
+
+    `from_date` (YYYY-MM-DD) is the day the 1:40 PM schedule took effect. Streams
+    before it keep their stored values (they were graded against the old schedule).
+    Defaults to 2026-06-01, when start times settle onto the 1:40 PM target.
 
     Usage:
-      1) POST /api/admin/recompute-late?dry_run=true   -> preview the diff, changes nothing
-      2) POST /api/admin/recompute-late                -> commit the changes (runs once)
+      1) POST /api/admin/recompute-late?dry_run=true                      -> preview, changes nothing
+      2) POST /api/admin/recompute-late?dry_run=true&from_date=2026-05-18 -> preview a different cutover
+      3) POST /api/admin/recompute-late                                   -> commit the changes (runs once)
 
     Idempotent: it always recomputes from each stream's recorded start time, so
     re-running produces the same result. A Redis flag (migration:late_cutoff_2pm)
@@ -334,7 +339,7 @@ async def recompute_late(dry_run: bool = False):
     changes = []
     for s in streams:
         # Only touch streams on/after the cutover date
-        if s.get("date", "") < "2026-05-01":
+        if s.get("date", "") < from_date:
             continue
 
         hhmm = s.get("startTime")
@@ -364,6 +369,7 @@ async def recompute_late(dry_run: bool = False):
     return {
         "ok": True,
         "dry_run": dry_run,
+        "from_date": from_date,
         "total_streams": len(streams),
         "changed": len(changes),
         "changes": changes,
