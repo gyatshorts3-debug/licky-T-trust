@@ -199,7 +199,7 @@
          <header>
             <div class="site-tag">// COMMUNITY TRUST MONITOR //</div>
             <h1>LICKY_T</h1>
-            <div class="subtitle">SCHEDULED: 5:00 PM PST</div>
+            <div class="subtitle">SCHEDULED: 1:40 PM PT</div>
             <div class="twitch-badge">
                <div class="twitch-dot" id="twitchDot"></div>
                <span id="twitchStatus">connecting to twitch...</span>
@@ -321,7 +321,7 @@
                <div class="len-bar-wrap" id="lenBars"></div>
             </div>
          </div>
-         <div class="reset-note">Community votes reset every day at midnight PST. Trust meter stacks forever.</div>
+         <div class="reset-note">Community votes reset every day at midnight PT. Trust meter stacks forever.</div>
          <!-- ENGINE PREDICTION -->
          <div class="section-label gap">PREDICTION ENGINE</div>
          <div class="engine-card">
@@ -343,7 +343,7 @@
                <div class="engine-stat">
                   <div class="e-label">PREDICTED START TIME</div>
                   <div class="e-value" id="eng-starttime" style="color:var(--yellow)">--:-- PM</div>
-                  <div class="e-sub" id="eng-starttime-sub">PST</div>
+                  <div class="e-sub" id="eng-starttime-sub">PT</div>
                </div>
                <div class="engine-stat">
                   <div class="e-label">PREDICTED DURATION</div>
@@ -393,7 +393,7 @@
       </div>
       <script>
          // ── CONFIG ────────────────────────────────────────────────
-         const SCHEDULED_MIN  = 17 * 60; // 5pm PST
+         const SCHEDULED_MIN  = 13 * 60 + 40; // 1:40 PM PT
          const LENGTH_KEYS   = ['lt6','6to8','8to10','10to12','12plus'];
          const LENGTH_LABELS = {
            lt6:    '< 6h',
@@ -564,9 +564,9 @@
          }
          
          function getScheduledStreamTimePT(nowPT = getPT()) {
-           // returns a Date object for today's scheduled stream time in PT (5:00 PM)
+           // returns a Date object for today's scheduled stream time in PT (1:40 PM)
            const scheduled = new Date(nowPT);
-           scheduled.setHours(17, 0, 0, 0); // 5:00 PM PT
+           scheduled.setHours(13, 40, 0, 0); // 1:40 PM PT
            return scheduled;
          }
          
@@ -579,7 +579,7 @@
            const pill = document.getElementById('statusPill');
          
            const scheduled = getScheduledStreamTimePT(now);
-           const diff = scheduled - now; // ms until 5:00 (negative after)
+           const diff = scheduled - now; // ms until 1:40 (negative after)
          
            if (liveData) {
              el.className = 'countdown-display live';
@@ -600,7 +600,7 @@
              return;
            }
          
-           // BEFORE 5:00
+           // BEFORE 1:40
            if (diff > 0) {
              const h=Math.floor(diff/3600000),
                    m=Math.floor((diff%3600000)/60000),
@@ -614,7 +614,7 @@
              return;
            }
          
-           // GRACE WINDOW: 5:00 → 5:15 (diff is 0 to -15m)
+           // GRACE WINDOW: 1:40 → 2:00 (diff is 0 to -20m)
            if (diff > -LATE_GRACE_MS) {
              const graceLeft = LATE_GRACE_MS - Math.abs(diff);
              const m = Math.floor(graceLeft / 60000);
@@ -629,7 +629,7 @@
              return;
            }
          
-           // ACTUALLY LATE: after 5:15
+           // ACTUALLY LATE: after 2:00
            const late = Math.abs(diff) - LATE_GRACE_MS;
            const h=Math.floor(late/3600000),
                  m=Math.floor((late%3600000)/60000),
@@ -693,7 +693,7 @@
            // If he's live, use actual start time from Twitch.
            // If not live, use "lateness so far" once past scheduled time.
            let late_mins = 0;
-           let startTime = "17:00"; // fallback
+           let startTime = "13:40"; // fallback
          
            if (liveData?.started_at) {
              late_mins = calcLateMinsFromStartedAtUTC(liveData.started_at);
@@ -846,7 +846,7 @@
              document.getElementById('eng-lateprob').textContent = '--%';
              document.getElementById('eng-lateprob-sub').textContent = 'Awaiting stream data';
              document.getElementById('eng-starttime').textContent = '--:--';
-             document.getElementById('eng-starttime-sub').textContent = 'PST';
+             document.getElementById('eng-starttime-sub').textContent = 'PT';
              document.getElementById('eng-duration').textContent = '--';
              document.getElementById('eng-duration-sub').textContent = 'No duration data yet';
              document.getElementById('eng-confidence').textContent = '--%';
@@ -917,8 +917,8 @@
          const qLo = n < 10 ? 0.15 : 0.20;
          const qHi = n < 10 ? 0.85 : 0.80;
          
-         const lateLo = Math.round(quantile(lateSorted, qLo)); // minutes after 5:00
-         const lateHi = Math.round(quantile(lateSorted, qHi)); // minutes after 5:00
+         const lateLo = Math.round(quantile(lateSorted, qLo)); // minutes after 1:40
+         const lateHi = Math.round(quantile(lateSorted, qHi)); // minutes after 1:40
          
          const startLo = SCHEDULED_MIN + LATE_GRACE_MINS + lateLo;
          const startHi = SCHEDULED_MIN + LATE_GRACE_MINS + lateHi;
@@ -927,8 +927,8 @@
          const tHi = fmtTimeFromMinutes(startHi);
          
          // Color rules:
-         // - <= 5:20 (<= grace) => green
-         // - within 5 mins AFTER grace (5:20–5:25) => yellow
+         // - <= 2:00 (<= grace) => green
+         // - within 5 mins AFTER grace (2:00–2:05) => yellow
          // - beyond that => red
          function startColor(pastGraceMins) {
            if (pastGraceMins <= 0) return 'var(--green)';   // within grace
@@ -953,13 +953,13 @@
          const subEl = document.getElementById('eng-starttime-sub');
 
          if (lateHi <= 0) {
-            subEl.textContent = `PST · forecast stays within the 20m grace window`;
+            subEl.textContent = `PT · forecast stays within the 20m grace window`;
           } else if (lateLo <= 0) {
             subEl.textContent =
-              `PST · could still be within grace, or up to ~${hiPastGrace}m past grace`;
+              `PT · could still be within grace, or up to ~${hiPastGrace}m past grace`;
           } else {
             subEl.textContent =
-              `PST · ~${loPastGrace}–${hiPastGrace}m past grace`;
+              `PT · ~${loPastGrace}–${hiPastGrace}m past grace`;
           }
           
          // ── 3) Predicted duration (single value, NO shrink) ───────────────────
@@ -1051,7 +1051,7 @@
                   const dur = s.duration ? ` · ${parseFloat(s.duration).toFixed(1)}h stream` : '';
                   const [h, m] = s.startTime.split(':').map(Number);
             
-                  return `<div class="stream-row">${badge}<span class="stream-date">${s.date}</span><span class="stream-info">Started ${fmtTime(h, m)} PST${dur}</span></div>`;
+                  return `<div class="stream-row">${badge}<span class="stream-date">${s.date}</span><span class="stream-info">Started ${fmtTime(h, m)} PT${dur}</span></div>`;
                 }).join('')}
             
                 ${hasMore ? `
