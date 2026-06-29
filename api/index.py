@@ -34,6 +34,7 @@ TWITCH_CLIENT_SECRET = os.environ.get("TWITCH_CLIENT_SECRET", "")
 STREAMER_LOGIN       = os.environ.get("STREAMER_LOGIN", "licky_t")
 KV_URL               = os.environ.get("KV_REST_API_URL", "")
 KV_TOKEN             = os.environ.get("KV_REST_API_TOKEN", "")
+ADMIN_SECRET         = os.environ.get("ADMIN_SECRET", "")  # required to run the backfill endpoint
 
 # Scheduled start = 1:40 PM PT (countdown target).
 # Late after 2:00 PM PT (1:40 + 20m grace).
@@ -306,24 +307,34 @@ async def cast_length_vote(body: LengthVoteBody):
 
 # ── ONE-TIME BACKFILL ────────────────────────────────────
 @app.post("/api/admin/recompute-late")
-async def recompute_late(dry_run: bool = False, from_date: str = "2026-06-01"):
+async def recompute_late(secret: str = "", dry_run: bool = False, from_date: str = "2026-06-01"):
     """
     One-time backfill: recompute late/on-time for every saved stream dated
     `from_date` or later, using the current cutoff (1:40 PM + 20m grace = 2:00 PM PT).
+
+    Requires ?secret=... matching the ADMIN_SECRET env var (set it in the Vercel dashboard).
 
     `from_date` (YYYY-MM-DD) is the day the 1:40 PM schedule took effect. Streams
     before it keep their stored values (they were graded against the old schedule).
     Defaults to 2026-06-01, when start times settle onto the 1:40 PM target.
 
-    Usage:
-      1) POST /api/admin/recompute-late?dry_run=true                      -> preview, changes nothing
-      2) POST /api/admin/recompute-late?dry_run=true&from_date=2026-05-18 -> preview a different cutover
-      3) POST /api/admin/recompute-late                                   -> commit the changes (runs once)
+    Before committing, the current streams list is snapshotted to
+    streams:backup:<timestamp> so a bad run can be rolled back.
+
+    Usage (replace YOURSECRET):
+      1) POST /api/admin/recompute-late?secret=YOURSECRET&dry_run=true                      -> preview, changes nothing
+      2) POST /api/admin/recompute-late?secret=YOURSECRET&dry_run=true&from_date=2026-05-15 -> preview a different cutover
+      3) POST /api/admin/recompute-late?secret=YOURSECRET                                   -> commit the changes (runs once)
 
     Idempotent: it always recomputes from each stream's recorded start time, so
     re-running produces the same result. A Redis flag (migration:late_cutoff_2pm)
     blocks accidental re-commits. To intentionally re-run later, delete that key first.
     """
+    if not ADMIN_SECRET:
+        raise HTTPException(status_code=503, detail="ADMIN_SECRET not configured on the server")
+    if secret != ADMIN_SECRET:
+        raise HTTPException(status_code=401, detail="bad or missing secret")
+
     r = get_redis()
 
     if not dry_run and r.get("migration:late_cutoff_2pm"):
@@ -362,7 +373,12 @@ async def recompute_late(dry_run: bool = False, from_date: str = "2026-06-01"):
             if not dry_run:
                 s["late_mins"] = new_late
 
+    backup_key = None
     if not dry_run:
+        # Snapshot the ORIGINAL streams before overwriting, so we can roll back.
+        backup_key = f"streams:backup:{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+        r.set(backup_key, raw if raw else json.dumps([]))
+
         r.set("streams", json.dumps(streams))
         r.set("migration:late_cutoff_2pm", pt_today())
 
@@ -370,6 +386,81 @@ async def recompute_late(dry_run: bool = False, from_date: str = "2026-06-01"):
         "ok": True,
         "dry_run": dry_run,
         "from_date": from_date,
+        "backup_key": backup_key,  # null on dry runs; the Redis key holding the pre-run snapshot
+        "total_streams": len(streams),
+        "changed": len(changes),
+        "changes": changes,
+    }
+
+
+# ── REPAIR: split-schedule recompute (no flag, idempotent) ───────────────
+def _calc_late_mins_old5pm(start_hhmm: str) -> int:
+    """Old schedule: 5:00 PM PT + same 20m grace = late after 5:20 PM."""
+    h, m = map(int, start_hhmm.split(":"))
+    actual_mins = h * 60 + m
+    scheduled_mins = 17 * 60  # 5:00 PM
+    return max(0, actual_mins - (scheduled_mins + LATE_GRACE_MINS))
+
+
+@app.post("/api/admin/repair-late")
+async def repair_late(dry_run: bool = False, new_from_date: str = "2026-05-20"):
+    """
+    One-shot repair that recomputes EVERY stream's late_mins from its recorded
+    start time, using a split schedule:
+      - date >= new_from_date  -> new 1:40 PM cutoff (late after 2:00 PM)
+      - date <  new_from_date  -> old 5:00 PM cutoff (late after 5:20 PM)
+
+    Recomputes from start times, so it corrects records a previous run mutated.
+    Ignores the migration flag and writes a backup before committing.
+
+      preview:  POST /api/admin/repair-late?dry_run=true
+      commit:   POST /api/admin/repair-late
+      other date: ...?dry_run=true&new_from_date=2026-05-18
+    """
+    r = get_redis()
+    raw = r.get("streams")
+    streams = json.loads(raw) if raw else []
+
+    changes = []
+    for s in streams:
+        hhmm = s.get("startTime")
+        if not hhmm and s.get("started_at"):
+            dt = datetime.fromisoformat(s["started_at"].replace("Z", "+00:00"))
+            hhmm = pt_time_str(dt)
+        if not hhmm:
+            continue
+
+        date = s.get("date", "")
+        if date >= new_from_date:
+            new_late = calc_late_mins(hhmm)            # new 1:40 PM rule
+            rule = "1:40pm"
+        else:
+            new_late = _calc_late_mins_old5pm(hhmm)    # old 5:00 PM rule
+            rule = "5pm"
+
+        old_late = s.get("late_mins", 0)
+        if old_late != new_late:
+            changes.append({
+                "date": date,
+                "startTime": hhmm,
+                "rule": rule,
+                "old": f"{old_late}m ({'late' if old_late > 0 else 'ontime'})",
+                "new": f"{new_late}m ({'late' if new_late > 0 else 'ontime'})",
+            })
+            if not dry_run:
+                s["late_mins"] = new_late
+
+    backup_key = None
+    if not dry_run:
+        backup_key = f"streams:backup:{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+        r.set(backup_key, raw if raw else json.dumps([]))
+        r.set("streams", json.dumps(streams))
+
+    return {
+        "ok": True,
+        "dry_run": dry_run,
+        "new_from_date": new_from_date,
+        "backup_key": backup_key,
         "total_streams": len(streams),
         "changed": len(changes),
         "changes": changes,
